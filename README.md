@@ -1,5 +1,3 @@
-# ai201-project3-takemeter
-
 # TakeMeter: Celebrity Gossip Discourse Classifier
 
 A fine-tuned text classifier that distinguishes between rumors, news, and opinion in celebrity gossip communities.
