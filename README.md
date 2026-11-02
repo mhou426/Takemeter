@@ -185,16 +185,6 @@ If I were to improve this, the single highest-impact change would be a manual an
 
 **Where implementation diverged:** The spec assumed manual collection of real community posts, with the researcher reading and labeling each example individually. I attempted Reddit scraping first but was blocked by their API access restrictions. I pivoted to RSS feed collection with source-based labeling, which is faster and produces a larger dataset but removes the researcher from the annotation decision entirely. Labels get assigned by which website a post came from, not by reading the post. The result is a dataset with systematic label noise in the news category, and that noise is the primary driver of the model's failure on that class. A manual annotation pass on the news examples would likely have caught the product-recommendation mislabeling and improved news F1 substantially.
 
-## AI Usage
-
-**Instance 1: Data collection pipeline.** I directed Claude to write the RSS feed scraping script (`pull_data.py`) after Reddit API access was blocked. Claude produced multiple iterations of the script as individual feeds returned 403/404 errors and as a Windows console encoding issue broke all output. I executed each version, reported the output counts, and Claude adjusted the feed list to balance the label distribution. The final script and feed selection reflect several rounds of debugging against live feed responses.
-
-**Instance 2: Documentation drafting.** I directed Claude to draft both planning.md and README.md using the actual model outputs, confusion matrix numbers, and wrong prediction text from my Colab notebook. I provided all numerical results and the full set of wrong and correct predictions as inputs. Claude produced draft text. I reviewed the drafts for accuracy against the notebook output and revised the analysis and tone to match my voice.
-
-**Instance 3: Failure pattern analysis.** After running the evaluation in Section 4, I shared the 15 wrong predictions with Claude and asked it to identify common patterns. Claude identified the systematic news-to-opinion collapse and linked it to the source-based labeling strategy. I verified this by re-reading the misclassified examples and confirmed that the pattern held: most "news" errors were articles with editorial framing that happened to come from news-coded sources.
-
-**Annotation assistance disclosure:** No LLM pre-labeling of individual posts was used. Labels were assigned programmatically by source domain. The source-to-label mapping (tabloid = rumor, magazine = news, blog = opinion) was designed collaboratively with Claude and applied in the scraping script.
-
 ## Demo Video
 
 https://www.loom.com/share/c67deab514974af6aa76466e6a2ed560
