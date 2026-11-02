@@ -1,0 +1,86 @@
+{
+  "device": "Tesla T4",
+  "settings": {
+    "model": "distilbert-base-uncased",
+    "epochs": 10,
+    "lr": 5e-05,
+    "batch": 16,
+    "max_length": 256,
+    "seeds": [
+      42,
+      7,
+      2026
+    ]
+  },
+  "runs": [
+    {
+      "seed": 42,
+      "baseline": {
+        "accuracy": 0.7561,
+        "macro_f1": 0.7114,
+        "label_f1": {
+          "rumor": 0.5455,
+          "news": 0.75,
+          "opinion": 0.8387
+        }
+      },
+      "finetuned": {
+        "accuracy": 0.7805,
+        "macro_f1": 0.6956,
+        "label_f1": {
+          "rumor": 0.3636,
+          "news": 0.8,
+          "opinion": 0.9231
+        }
+      }
+    },
+    {
+      "seed": 7,
+      "baseline": {
+        "accuracy": 0.8537,
+        "macro_f1": 0.7859,
+        "label_f1": {
+          "rumor": 0.5455,
+          "news": 0.8837,
+          "opinion": 0.9286
+        }
+      },
+      "finetuned": {
+        "accuracy": 0.8537,
+        "macro_f1": 0.7858,
+        "label_f1": {
+          "rumor": 0.5455,
+          "news": 0.8889,
+          "opinion": 0.9231
+        }
+      }
+    },
+    {
+      "seed": 2026,
+      "baseline": {
+        "accuracy": 0.7073,
+        "macro_f1": 0.6314,
+        "label_f1": {
+          "rumor": 0.3636,
+          "news": 0.7179,
+          "opinion": 0.8125
+        }
+      },
+      "finetuned": {
+        "accuracy": 0.7561,
+        "macro_f1": 0.7012,
+        "label_f1": {
+          "rumor": 0.4,
+          "news": 0.7805,
+          "opinion": 0.9231
+        }
+      }
+    }
+  ],
+  "verdicts": {
+    "1": "MISSED",
+    "2": "MISSED",
+    "4": "MISSED",
+    "5": "MISSED"
+  }
+}
