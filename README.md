@@ -1,190 +1,160 @@
-# TakeMeter: Celebrity Gossip Discourse Classifier
+# TakeMeter: Celebrity News Classifier
 
-A fine-tuned text classifier that distinguishes between rumors, news, and opinion in celebrity gossip communities.
+A fine-tuned DistilBERT model that reads celebrity media posts and classifies each one as **rumor**, **news**, or **opinion**. The question behind it: can a model tell a claim backed by a named source from one built on unnamed sources or speculation?
 
-## Community
+**Version 2 results** (averaged over 3 random data splits):
 
-I chose celebrity gossip and entertainment media as the source community, drawing from public RSS feeds across tabloids (Page Six, OK Magazine, The Sun), entertainment magazines (E! Online, US Magazine, Variety, Hollywood Reporter), and commentary blogs (Celebitchy, DListed, LaineyGossip, Screen Rant, Collider). This community works well for a classification task because the same subject matter (a celebrity's name, relationship, career move) shows up in posts that range from unverified speculation to confirmed reporting to pure editorial commentary. That range is exactly what makes labeling interesting and nontrivial. Readers in gossip spaces genuinely care about whether a story is verified or not, and that distinction maps naturally to a classifier.
+| Label | F1 |
+|---|---|
+| opinion | 0.92 |
+| news | 0.82 |
+| rumor | 0.44 |
+| **macro F1** | **0.73** |
 
-## Label Taxonomy
+Version 1 scored 0.52 macro F1 and 0 on news. Most of the improvement came from fixing the data, not the model.
 
-**rumor**: A post containing unverified claims about a celebrity, including speculation, blind items, unnamed sourcing ("insiders say," "sources close to"), or "I heard" style gossip. The defining feature is that the claim is not backed by a traceable, named source.
+The model detects **sourcing language**, not truth. It cannot fact check a claim; it learns whether a claim is attributed to a named source or document, or to unnamed sources and speculation.
 
-- Example 1: "Apparently a major pop star was spotted leaving a certain actor's apartment three nights in a row. My source works nearby and swears it's true."
-- Example 2: "Word is that a certain A-list couple has been sleeping in separate bedrooms for months. No official comment yet but multiple people in their circle are talking."
+---
 
-**news**: A post reporting a confirmed event, official statement, or verifiable fact about a celebrity, attributed to a named source, publicist, or documented record. The claim is traceable and would hold up to basic fact-checking.
+## Labels
 
-- Example 1: "Jennifer Lopez and Ben Affleck have officially filed for divorce. Both representatives released statements confirming the filing this morning."
-- Example 2: "Nicki Minaj's $10 million lawsuit against an alleged stalker has been settled, per court records filed Tuesday."
+| Label | Definition | Example |
+|---|---|---|
+| rumor | An unverified claim about a celebrity: speculation, blind items, or unnamed sourcing ("insiders say," "a source close to") | "John Mayer and Kat Stickler quietly split a few months ago, according to a source." |
+| news | A confirmed event or statement attributed to a named source, the celebrity themself, or a documented record (court filings, official announcements, their own posts) | "Liam Payne's estate will go to his son, court documents reveal." |
+| opinion | The author's own take, review, ranking, recommendation, or commentary | A gossip blog post analyzing a royal feud in the author's voice |
 
-**opinion**: A post expressing a personal take, critical judgment, theory, or argument about a celebrity or entertainment topic. The post is primarily the author's perspective, not a report of external events.
+**Decision rules for the hard boundaries:**
 
-- Example 1: "Unpopular opinion but Taylor Swift's earlier country albums were genuinely better than anything she has released in the last five years."
-- Example 2: "I genuinely think the backlash against Zendaya is completely manufactured. She has never done anything to deserve this level of criticism."
+- Unnamed sources make it **rumor**, even if the post has specific details.
+- A reported fact about what a celebrity did or said is **news**, even with a dramatic headline.
+- If the main content is the author's recommendation, ranking, roundup, or judgment, it is **opinion**.
 
-## Dataset
+---
 
-**Source:** Public RSS feeds from celebrity and entertainment media sites, collected June 2026.
+## Data
 
-- Rumor feeds: Page Six, Hollywood Life, OK Magazine, The Sun (TV/showbiz)
-- News feeds: US Magazine, E! Online, Just Jared, Hollywood Reporter, Variety
-- Opinion feeds: Celebitchy, DListed, LaineyGossip, AV Club, Screen Rant, Collider, The Mary Sue
+Posts come from public RSS feeds of celebrity and entertainment sites (tabloids, entertainment magazines, music and film sites, gossip blogs), collected with `pull_data.py`.
 
-**Labeling process:** Labels were assigned by source domain. Gossip tabloids mapped to `rumor`, entertainment magazines to `news`, and commentary/criticism blogs to `opinion`. For each post, the RSS title and description were concatenated into a single text field capped at 600 characters. HTML tags and entities were stripped. Duplicates were removed by comparing the first 80 characters.
+**Version 1 problem:** labels were assigned by which website a post came from. Many posts did not match their site's label, and the "news" class was full of shopping ads.
 
-This is a proxy labeling strategy: source type generally predicts content type, but individual articles may not match the domain default. I discuss the consequences of this in the Reflection section.
+**Version 2 cleanup pipeline:**
 
-**Label distribution:**
+1. **Removed ads and off-topic posts.** `find_ads.py` flags posts containing shopping words; each flagged post was checked by hand. A later pass removed posts unrelated to celebrities or entertainment (politics, general news, viral stories about non-celebrities, sponsored brand content). **65 of 337 posts removed (19%).**
+2. **Relabeled by content.** `llm_label.py` had an open LLM (GPT OSS 120B via Groq) label every post using the definitions above, then compared its labels to the original source labels.
+   - Agreed on 133 posts: label accepted.
+   - Disagreed on 119 posts: reviewed, 83 changed and 36 kept.
+3. **20 posts labeled by hand with no AI help** (marked `cold` in the `note` column), as an independent check.
 
-| Label   | Count | Percentage |
-|---------|-------|------------|
-| opinion | 142   | 42.1%      |
-| rumor   | 100   | 29.7%      |
-| news    | 95    | 28.2%      |
-| **Total** | **337** | |
+**Final dataset:** `labels_final.csv`, 272 posts.
 
-No single label exceeds 42% of the dataset. The train/validation/test split was 70/15/15 (235 train, 51 validation, 51 test), stratified by label.
+| Label | Count | Share |
+|---|---|---|
+| news | 140 | 51% |
+| opinion | 89 | 33% |
+| rumor | 43 | 16% |
 
-**Difficult-to-label examples:**
+The relabeling showed that tabloid "rumor" sites mostly publish documented facts (court records, bodycam footage, the celebrity's own posts), and music blogs labeled "opinion" mostly publish plain announcements. Real rumors with unnamed sources turned out to be rare.
 
-1. *"Hacks' Robby Hoffman Reveals She Stormed Out of 2025 Emmys After Loss."* The headline uses dramatic, emotionally charged language ("stormed out") that sounds like unverified gossip. But the content is a first-person account from Hoffman herself, making it a confirmed statement. I labeled it **news** because the source is the subject of the story, not an unnamed third party.
+---
 
-2. *"Miranda Kerr's 'Fresh, Natural' Drugstore Foundation Pick Is Only $9."* This is a product recommendation article from a celebrity news site. The celebrity is real and the product claim is verifiable, but the primary content is editorial recommendation rather than event reporting. I labeled it **news** because it came from E! Online (a news-coded source), but in retrospect the content reads more like opinion. This case exposed a real weakness in source-based labeling.
+## Training
 
-3. *"Was Taylor Parker Diagnosed With a Disorder? Inside Her Mental Health."* A longform article about a real person's verified legal case and mental health record, sourced from court documents. The question-framing headline sounds speculative, but the body cites documented records. I labeled it **news** despite the sensational headline because the sourcing is traceable.
+Notebook: `takemeter_v2.ipynb` (Google Colab, T4 GPU).
 
-## Fine-Tuning Pipeline
+| Setting | Value |
+|---|---|
+| Base model | distilbert-base-uncased (Hugging Face) |
+| Split | 70 / 15 / 15 train / validation / test, stratified |
+| Epochs | 10 |
+| Learning rate | 5e-5 |
+| Batch size | 16 |
+| Warmup | 10% of training steps |
+| Best epoch chosen by | validation macro F1 |
+| Seeds | 42, 7, 2026 |
 
-**Base model:** `distilbert-base-uncased` from HuggingFace
+**The underfitting bug.** With 190 training posts and batch size 16, three epochs is only 36 weight updates. Version 1 also used 50 warmup steps, so the learning rate never reached its full value. The first version 2 run (3 epochs, 2e-5) predicted "news" for every post in two of three seeds. Raising epochs to 10 and the learning rate to 5e-5 fixed it. Keeping the epoch with the best validation macro F1 guards against overfitting from the extra epochs.
 
-**Training platform:** Google Colab with free T4 GPU
+---
 
-**Training setup:**
+## Evaluation
 
-| Parameter      | Value |
-|----------------|-------|
-| Epochs         | 3     |
-| Learning rate  | 2e-5  |
-| Train batch    | 16    |
-| Eval batch     | 32    |
-| Weight decay   | 0.01  |
-| Warmup steps   | 50    |
-| Best model by  | Validation accuracy |
+Each seed creates a new random split. The baseline is TF-IDF plus logistic regression in scikit-learn, trained and tested on the same splits.
 
-**Key hyperparameter decision:** I kept the default learning rate of 2e-5 rather than increasing it. With only 235 training examples, a higher learning rate risks overshooting the loss minimum and overfitting to the small training set. The training loss decreased steadily across all three epochs (1.087 to 1.051 to 1.016) without diverging, which confirmed that 2e-5 was appropriate for this dataset size. Validation accuracy improved significantly only in epoch 3 (from 0.431 to 0.706), suggesting the model needed all three epochs to adapt its pretrained representations to this domain before the classification head could generalize.
+| Seed | Accuracy | Macro F1 | Baseline macro F1 | rumor F1 | news F1 | opinion F1 |
+|---|---|---|---|---|---|---|
+| 42 | 0.78 | 0.70 | 0.71 | 0.36 | 0.80 | 0.92 |
+| 7 | 0.85 | 0.79 | 0.79 | 0.55 | 0.89 | 0.92 |
+| 2026 | 0.76 | 0.70 | 0.63 | 0.40 | 0.78 | 0.92 |
 
-## Baseline
+**Confusion matrix, seed 2026** (rows are true labels, columns are predictions):
 
-**Approach:** Zero-shot classification using `llama-3.3-70b-versatile` via the Groq API. Each test example was passed to the model with a system prompt containing the three label definitions and one example post per label. The model was instructed to respond with only the label name. Temperature was set to 0 for deterministic output.
+| true \ predicted | rumor | news | opinion |
+|---|---|---|---|
+| **rumor** | 3 | 3 | 0 |
+| **news** | 5 | 16 | 0 |
+| **opinion** | 1 | 1 | 12 |
 
-**Prompt used:**
+### Success criteria
 
-```
-You are classifying posts from a celebrity gossip community.
-Assign each post to exactly one of the following categories.
+Set in `criteria.md` before training.
 
-rumor: Unverified claims, speculation, blind items, unnamed sources, "I heard" stories about celebrities.
-Example: "Apparently a major pop star was spotted leaving a certain actor's apartment. My source works nearby and swears it's true."
+| Criterion | Target | Result | Verdict |
+|---|---|---|---|
+| 1. Every label F1 | at least 0.60 | news 0.78 to 0.89 and opinion 0.92 passed; rumor 0.36 to 0.55 failed | Missed (rumor only) |
+| 2. Worst label F1 / best label F1 | at least 0.70 | 0.39 to 0.59 (rumor vs opinion) | Missed (rumor only) |
+| 3. Agreement when relabeling the 20 cold posts | at least 15 of 20 | not yet run | Pending |
+| 4. Macro F1 lead over baseline | at least 0.10 | -0.02 to +0.07 | Missed |
+| 5. Accuracy spread across seeds | at most 0.05 | 0.095, under the common 0.10 stability line | Missed |
 
-news: Confirmed events, official statements, verifiable facts from named sources about celebrities.
-Example: "Jennifer Lopez and Ben Affleck have officially filed for divorce. Their reps both released statements this morning."
+News and opinion pass in every seed. Criteria 1 and 2 miss only because of rumor, which has just 43 examples, and the small dataset also limits criteria 4 and 5. The next step is adding more rumor data.
 
-opinion: Personal takes, judgments, theories, and views about celebrities. "I think," unpopular opinion, arguments for a position.
-Example: "Unpopular opinion but Taylor Swift's earlier country albums were genuinely better than anything she's released recently."
+**Why each miss happened:**
 
-Respond with ONLY the single word: rumor, news, or opinion
-Do not explain your reasoning.
-```
+- **1 and 2: rumor is thin.** 43 posts total, 6 or 7 per test set, so one post changes its F1 a lot. News and opinion pass easily.
+- **4: the baseline reads sourcing words well.** The labels hinge on phrases like "a source says" versus "court documents," which word counting picks up. With 190 training posts, DistilBERT has little room to add more.
+- **5: small test set.** With 41 test posts, each post is worth 2.4 accuracy points; a spread of 0.095 is about 4 posts.
 
-All 51 test responses were parseable (0 unparseable).
+---
 
-## Evaluation Report
+## Error analysis
 
-### Results Summary
+8 of the 10 errors in seed 2026 are rumor versus news. They fall into two groups:
 
-| Model                        | Accuracy |
-|------------------------------|----------|
-| Zero-shot baseline (Groq)    | 0.373    |
-| Fine-tuned DistilBERT        | 0.647    |
-| **Improvement**              | **+0.275** |
+- **The model followed writing style instead of sourcing.** "John Mayer and Kat Stickler split, according to a source" was predicted news with 0.95 confidence; it comes from a news-style outlet. Liam Payne's estate ("court documents reveal") was predicted rumor; it is written in tabloid style. The model partly learned how an outlet writes, a leftover effect of collecting from fixed sources.
+- **The label was wrong.** "Nick Cannon honors late son... posted a tribute" is labeled rumor, but by the rules above it is news, and the model said news.
 
-Test set size: 51 examples (15 rumor, 15 news, 21 opinion).
+**Hard cases while labeling:**
 
-### Per-Class Metrics: Fine-Tuned Model
+- Gossip blogs repeating a tabloid claim (royal family stories): opinion if the post is mainly the author's commentary, rumor if it just passes the claim on.
+- "Everything to know" explainers: news if they report facts, opinion if they rank or recommend.
+- A courtier quoted by name in a gossip blog: the quote is sourced, but the post is framed as commentary.
 
-| Label   | Precision | Recall | F1   | Support |
-|---------|-----------|--------|------|---------|
-| rumor   | 0.86      | 0.80   | 0.83 | 15      |
-| news    | 0.00      | 0.00   | 0.00 | 15      |
-| opinion | 0.57      | 1.00   | 0.72 | 21      |
+---
 
-### Per-Class Metrics: Baseline
+## Next steps
 
-| Label   | Precision | Recall | F1   | Support |
-|---------|-----------|--------|------|---------|
-| rumor   | 0.25      | 0.07   | 0.11 | 15      |
-| news    | 0.32      | 0.87   | 0.46 | 15      |
-| opinion | 0.83      | 0.24   | 0.37 | 21      |
+- Add 50 or more rumor posts with unnamed sourcing, from news-style outlets, to break the link between writing style and label.
+- Run the cold relabel check (criterion 3).
+- Try a larger model once the dataset grows.
 
-### Confusion Matrix: Fine-Tuned Model
+---
 
-|              | Predicted: rumor | Predicted: news | Predicted: opinion |
-|--------------|------------------|-----------------|--------------------|
-| True: rumor  | 12               | 0               | 3                  |
-| True: news   | 2                | 0               | 13                 |
-| True: opinion| 0                | 0               | 21                 |
+## Repository
 
-The model never predicts `news`. All 15 true news examples were misclassified: 13 as opinion and 2 as rumor.
+| File | Purpose |
+|---|---|
+| `pull_data.py` | Collects posts from RSS feeds |
+| `find_ads.py` | Flags shopping posts for review and removes the confirmed ones |
+| `llm_label.py` | LLM relabeling, comparison with source labels, and merging reviewed labels |
+| `labels_final.csv` | Version 2 dataset (`text`, `label`, `note`) |
+| `criteria.md` | Success criteria, written before training |
+| `takemeter_v2.ipynb` | Training, baseline, 3-seed evaluation, criteria check |
+| `results_three_seeds.json` | Version 2 results |
+| `v1/` | Version 1 data, results, and planning notes |
 
-### Wrong Prediction Analysis
+## AI usage
 
-**Error 1: news predicted as opinion (confidence: 0.40)**
-
-> "Top Gun Star James Handy's Death Certificate Reveals Sad New Details..."
-
-True label: news. This article reports a verifiable fact (contents of a public death certificate). However, the headline uses emotionally charged language ("Sad New Details") that is indistinguishable in tone from an editorial take. The model learned to associate emotive framing with opinion, and this news article's presentation triggered that pattern. This is a data problem: many "news" articles in the training set were written in a sensational editorial voice, so the model had no reliable text signal to separate news from opinion.
-
-**Error 2: news predicted as opinion (confidence: 0.38)**
-
-> "Miranda Kerr's 'Fresh, Natural' Drugstore Foundation Pick Is Only $9..."
-
-True label: news (by source domain). The content is a product recommendation, which is essentially editorial. This example exposed the core labeling flaw: the label was assigned based on the source (E! Online = news) rather than the content. A product recommendation from E! Online reads identically to opinion writing from Celebitchy. The model identified the content as opinion-like, which is arguably the correct reading of the text. The label was wrong by the source-based convention I used during data collection.
-
-**Error 3: news predicted as rumor (confidence: 0.42)**
-
-> "Hacks' Robby Hoffman Reveals She Stormed Out of 2025 Emmys After Loss..."
-
-True label: news. This is a confirmed statement from the subject herself. However, "stormed out" is a tabloid-style phrase, and "reveals" is a word pattern common in gossip and rumor posts ("sources reveal," "insiders reveal"). The model associated this phrasing with the rumor class, which is a reasonable surface-level inference given the training data. This error points to the difficulty of separating news from rumor when news sources adopt tabloid language.
-
-### Sample Classifications
-
-| Post (truncated) | True | Predicted | Confidence |
-|------------------|------|-----------|------------|
-| The Strokes Follow A Big Coachella Weekend By Announcing A 2026 World Tour... | opinion | opinion | 0.63 |
-| 'One Night Only': Everything To Know About Callum Turner And Monica Barbaro's Rom-Com... | opinion | opinion | 0.57 |
-| It's The Series Finale. I cannot believe that after all these years, my time with Dlisted... | opinion | opinion | 0.62 |
-| Nicki Minaj's $10 Million Legal Fight With Alleged 'Stalker' is Over... | rumor | rumor | 0.39 |
-| Jennifer Lopez: Mom with the hookups. Jennifer Lopez was one of so many celebrities... | opinion | opinion | 0.57 |
-
-**Correct prediction explained:** The Strokes tour announcement post was correctly labeled opinion (confidence 0.63). The post is written in an editorial voice typical of music commentary blogs, combining factual details (Coachella, 2026 world tour) with framing that signals authorial perspective ("a busy spring and summer" reads as commentary, not reporting). The model correctly associated this register with opinion. This is the kind of post where fine-tuning genuinely helped, since the baseline only achieved 0.24 recall on opinion.
-
-## Reflection: What the Model Learned vs. What Was Intended
-
-The intended behavior was a three-way classifier distinguishing verified facts (news) from unverified claims (rumor) from editorial perspective (opinion). What the model actually learned was a two-way classifier: it reliably separates rumor from opinion, but it collapsed news entirely into opinion.
-
-The core failure is a labeling design problem, not a model problem. Labels were assigned by source domain. E! Online and Variety posts were tagged as `news` because of where they came from, not because of what they contained. But celebrity news articles are frequently written in an editorial style: listicles, product roundups, style retrospectives, emotionally framed headlines. These texts are linguistically indistinguishable from opinion writing. The model had no reliable text signal to separate the two classes because the training data never reflected a consistent text-level distinction between them.
-
-The rumor class succeeded because tabloid writing has genuinely distinct surface features: unnamed sourcing language, present-tense speculation, and dramatic hedging ("reportedly," "insiders say") that appear consistently across examples. The opinion class succeeded for the same reason: editorial voice, subjective framing, and first-person takes are consistent markers. News failed because the boundary was defined by metadata (source domain) rather than by anything in the text itself.
-
-If I were to improve this, the single highest-impact change would be a manual annotation pass on the 95 news examples, relabeling each one based on its actual content rather than its source. That would likely move a significant number of product roundups and editorial listicles from news to opinion, giving the model a cleaner signal and bringing news F1 above zero.
-
-## Spec Reflection
-
-**How the spec helped:** The spec's guidance on strong vs. weak taxonomies pushed me to write decision rules for edge cases (the rumor/news boundary, the news/opinion boundary) before starting data collection. That upfront investment made the labeling process faster and helped me recognize the domain-labeling tradeoff explicitly rather than discovering it only during evaluation.
-
-**Where implementation diverged:** The spec assumed manual collection of real community posts, with the researcher reading and labeling each example individually. I attempted Reddit scraping first but was blocked by their API access restrictions. I pivoted to RSS feed collection with source-based labeling, which is faster and produces a larger dataset but removes the researcher from the annotation decision entirely. Labels get assigned by which website a post came from, not by reading the post. The result is a dataset with systematic label noise in the news category, and that noise is the primary driver of the model's failure on that class. A manual annotation pass on the news examples would likely have caught the product-recommendation mislabeling and improved news F1 substantially.
-
-## Demo Video
-
-https://www.loom.com/share/c67deab514974af6aa76466e6a2ed560
+- Claude assisted in writing the scripts, edited the training notebook, and helped analyze errors.
+- GPT OSS 120B (via Groq) pre-labeled posts by content. Conflicting labels got a second AI review; I decided the uncertain cases, overriding the AI on 19 of 31.
